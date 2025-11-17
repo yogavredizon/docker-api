@@ -37,7 +37,7 @@ func LimitRequestPost() gin.HandlerFunc {
 
 func ValidateToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		key := c.Request.Header.Get("API_KEY")
+		key := c.Request.Header.Get("X-API-KEY")
 
 		if key != os.Getenv("API_KEY") {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})

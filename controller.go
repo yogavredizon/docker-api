@@ -2,64 +2,61 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"sync"
+	"time"
 )
 
 var urlPattern = "containers"
 
 type ContainerController struct {
-	Servers []Server
+	Servers map[string]Server
+	Mitra   map[string]string
 	wg      *sync.WaitGroup
 }
 
-func (c *ContainerController) GetContainers() ([]Server, error) {
-	conChan := make(chan Server, len(c.Servers))
+func (c *ContainerController) GetContainers() ([]Container, error) {
+	conChan := make(chan []Container, len(c.Servers))
+	client := http.Client{
+		Timeout: 5 * time.Second,
+	}
 
 	for _, server := range c.Servers {
 		s := server
 		c.wg.Add(1)
 
-		url := fmt.Sprintf("http://%v:%v/%v/%v", s.Host, s.Port, s.Name, urlPattern)
-		go func(s Server, url string) {
+		go func(s Server, mitra map[string]string) {
 			defer c.wg.Done()
-
-			containers, err := fetch(url)
+			containers, err := fetch(&client, s, mitra)
 			if err != nil {
 				log.Println(err)
 				return
 			}
 
-			result := Server{
-				Host:      s.Host,
-				Port:      s.Port,
-				Name:      s.Name,
-				Container: containers,
-			}
+			conChan <- containers
 
-			conChan <- result
-
-		}(s, url)
+		}(s, c.Mitra)
 	}
 
 	c.wg.Wait()
 	close(conChan)
 
-	var servers []Server
+	var containers []Container
 	for s := range conChan {
-		servers = append(servers, s)
-
+		containers = append(containers, s...)
 	}
 
-	return servers, nil
+	return containers, nil
 }
 
-func fetch(url string) ([]Container, error) {
-	client := http.Client{}
+func fetch(client *http.Client, s Server, mitra map[string]string) ([]Container, error) {
+	url := fmt.Sprintf("http://%v:%v/%v", s.Host, s.Port, urlPattern)
 	req, err := http.NewRequest("GET", url, nil)
+
 	req.Header.Set("X-AUTH-TOKEN", os.Getenv("X_AUTH_TOKEN"))
 	if err != nil {
 		log.Println(err)
@@ -72,29 +69,42 @@ func fetch(url string) ([]Container, error) {
 		return nil, err
 	}
 
-	var containers map[string][]Container
-	err = json.NewDecoder(res.Body).Decode(&containers)
+	var result map[string][]Container
+	err = json.NewDecoder(res.Body).Decode(&result)
 	if err != nil {
 		log.Println(err)
 		return nil, err
 	}
 
-	res.Body.Close()
+	var containers []Container
+	for _, c := range result["containers"] {
+		if mitraName, ok := mitra[c.Name]; ok {
+			c.MitraName = mitraName
+		}
 
-	return containers["containers"], nil
+		containers = append(containers, c)
+	}
+
+	return containers, nil
 }
 
-func (c *ContainerController) StartContainer(s Server, id string) (map[string]string, error) {
-	url := fmt.Sprintf("http://%s:%v/%s/%s/start/", s.Host, s.Port, s.Name, urlPattern)
+func (c *ContainerController) StartContainer(container RequestContainer) (map[string]string, error) {
+	// check if server has a given container
+	server, ok := c.Servers[container.ServerId]
+	if !ok {
+		return nil, errors.New("server id tidak valid")
+	}
 
+	// make a request to the container server
 	client := http.Client{}
-	req, err := http.NewRequest("PUT", url+id, nil)
-	req.Header.Set("X-AUTH-TOKEN", os.Getenv("X_AUTH_TOKEN"))
+	url := fmt.Sprintf("http://%s:%v/%s/start/", server.Host, server.Port, urlPattern)
+	req, err := http.NewRequest("PUT", url+container.ContainerId, nil)
 	if err != nil {
 		log.Println(err)
 		return nil, err
 	}
 
+	req.Header.Set("X-AUTH-TOKEN", os.Getenv("X_AUTH_TOKEN"))
 	res, err := client.Do(req)
 	if err != nil {
 		log.Println(err)
@@ -113,17 +123,24 @@ func (c *ContainerController) StartContainer(s Server, id string) (map[string]st
 	return result, nil
 }
 
-func (c *ContainerController) StopContainer(s Server, id string) (map[string]string, error) {
-	url := fmt.Sprintf("http://%s:%v/%s/%s/stop/", s.Host, s.Port, s.Name, urlPattern)
+func (c *ContainerController) StopContainer(container RequestContainer) (map[string]string, error) {
 
+	// check if server has a given container
+	server, ok := c.Servers[container.ServerId]
+	if !ok {
+		return nil, errors.New("server id tidak valid")
+	}
+
+	// make a request to the container server
 	client := http.Client{}
-	req, err := http.NewRequest("PUT", url+id, nil)
-	req.Header.Set("X-AUTH-TOKEN", os.Getenv("X_AUTH_TOKEN"))
+	url := fmt.Sprintf("http://%s:%v/%s/stop/", server.Host, server.Port, urlPattern)
+	req, err := http.NewRequest("PUT", url+container.ContainerId, nil)
 	if err != nil {
 		log.Println(err)
 		return nil, err
 	}
 
+	req.Header.Set("X-AUTH-TOKEN", os.Getenv("X_AUTH_TOKEN"))
 	res, err := client.Do(req)
 	if err != nil {
 		log.Println(err)

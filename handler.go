@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -39,8 +38,8 @@ func (cc *ContainerHandler) QueryContainers(c *gin.Context) {
 }
 
 func (cc *ContainerHandler) StartContainers(c *gin.Context) {
-	var request map[string]string
-	err := json.NewDecoder(c.Request.Body).Decode(&request)
+	var container RequestContainer
+	err := json.NewDecoder(c.Request.Body).Decode(&container)
 	if err != nil {
 		log.Println(err)
 		c.AbortWithStatusJSON(http.StatusInternalServerError, ResponseContainer{
@@ -52,16 +51,7 @@ func (cc *ContainerHandler) StartContainers(c *gin.Context) {
 		return
 	}
 
-	port, err := strconv.Atoi(request["port"])
-	if err != nil {
-		log.Println(err)
-		return
-	}
-	_, err = cc.ContainerController.StartContainer(Server{
-		Host: request["host"],
-		Port: port,
-		Name: request["name"],
-	}, request["containerId"])
+	_, err = cc.ContainerController.StartContainer(container)
 
 	if err != nil {
 		log.Println(err)
@@ -84,8 +74,8 @@ func (cc *ContainerHandler) StartContainers(c *gin.Context) {
 }
 
 func (cc *ContainerHandler) StopContainers(c *gin.Context) {
-	var request map[string]string
-	err := json.NewDecoder(c.Request.Body).Decode(&request)
+	var container RequestContainer
+	err := json.NewDecoder(c.Request.Body).Decode(&container)
 	if err != nil {
 		log.Println(err)
 		c.AbortWithStatusJSON(http.StatusInternalServerError, ResponseContainer{
@@ -97,17 +87,7 @@ func (cc *ContainerHandler) StopContainers(c *gin.Context) {
 		return
 	}
 
-	port, err := strconv.Atoi(request["port"])
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	_, err = cc.ContainerController.StopContainer(Server{
-		Host: request["host"],
-		Port: port,
-		Name: request["name"],
-	}, request["containerId"])
+	_, err = cc.ContainerController.StopContainer(container)
 
 	if err != nil {
 		log.Println(err)
